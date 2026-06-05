@@ -3,6 +3,8 @@ import requests
 from bs4 import BeautifulSoup
 import datetime
 
+from database import init_db, simpan_berita
+
 # Daftar sumber RSS yang akan (intinya sumber berita ekonomi Indonesia)
 SOURCES = {
     "CNBC Indonesia": "https://www.cnbcindonesia.com/news/rss",
@@ -85,11 +87,15 @@ def ambil_semua_berita(limit_per_source=3):
     return daftar_berita_hari_ini
 
 if __name__ == "__main__":
+    init_db() 
+
     hasil = ambil_semua_berita(limit_per_source=2)
     print(f"\n=== TOTAL BERITA YANG BERHASIL DIAMBIL: {len(hasil)} ===")
-    
-    if hasil:
-        print("\nContoh Data Pertama Yang Berhasil Didapat:")
-        print(f"Sumber: {hasil[0]['sumber']}")
-        print(f"Judul : {hasil[0]['judul']}")
-        print(f"Isi (Potongan) : {hasil[0]['isi_berita'][:200]}...")
+
+    berita_baru_count = 0
+    for item in hasil:
+        terimpan = simpan_berita(item)
+        if terimpan:
+            berita_baru_count += 1
+
+    print(f"-> Berhasil menyimpan {berita_baru_count} berita baru ke database.")
