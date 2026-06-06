@@ -219,3 +219,7 @@ __marimo__/
 
 # Database lokal project
 econews.db
+.DS_Store
+dummy_data.json
+econews.db
+__pycache__/
