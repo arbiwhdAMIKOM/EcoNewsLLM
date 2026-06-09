@@ -12,25 +12,42 @@ from cleaner import bersihkan_teks
 SOURCES: Dict[str, str] = {
     "CNBC Indonesia": "https://www.cnbcindonesia.com/news/rss",
     "Antara News": "https://www.antaranews.com/rss/ekonomi.xml",
+    "Antara News POLITIK": "https://www.antaranews.com/rss/politik.xml",
     "Detik Finance": "https://finance.detik.com/rss",
-    "MarketWatch": "https://feeds.content.dowjones.io/public/rss/mw_realtimeheadlines",
-    "KataData": "https://katadata.co.id/rss/finansial",
-    "Bloomberg Tech": "https://www.bloombergtechnoz.com/rss",
+    "MarketWatch": "https://feeds.content.dowjones.io/public/rss/mw_marketpulse",
+    "FoxNEWS Politics": "https://moxie.foxnews.com/google-publisher/politics.xml",
+    "BITCOIN": "https://news.bitcoin.com/feed/",
     "CoinDesk": "https://www.coindesk.com/arc/outboundfeeds/rss",
+    "The Wall Street Journal Social Economy": "https://feeds.content.dowjones.io/public/rss/socialeconomyfeed",
     "Investing Global": "https://id.investing.com/rss/news_25.rss",
     "Investing Indo": "https://id.investing.com/rss/news_14.rss",
     "Investing Insider": "https://id.investing.com/rss/news_357.rss",
     "Investing Emiten": "https://id.investing.com/rss/news_356.rss",
 }
 
+session = requests.Session()
+
+# 1. OPTIMASI: Header tingkat lanjut agar tidak dikira bot oleh Cloudflare/Akamai
+session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
+    'Referer': 'https://www.google.com/',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'cross-site',
+})
+
+# 2. OPTIMASI: Pangkas batas waktu agar sistem tidak tersandera situs lemot
+GLOBAL_TIMEOUT = 2
+
 def scrape_full_text(url: str, source_name: str) -> Tuple[str, str]:
     """Ekstraksi DOM HTML artikel spesifik berdasarkan target media."""
-    headers: Dict[str, str] = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    }
     try:
-        response = requests.get(url, headers=headers, timeout=3)
+        # Menggunakan session.get bukan requests.get
+        response = session.get(url, timeout=GLOBAL_TIMEOUT)
         if response.status_code != 200:
             return "", f"HTTP {response.status_code}"
 
@@ -56,10 +73,10 @@ def scrape_full_text(url: str, source_name: str) -> Tuple[str, str]:
 def ambil_daftar_artikel_dari_rss(name: str, rss_url: str, limit_per_source: int) -> Tuple[List[Dict[str, Any]], str, str]:
     """Stage 1: Fetch RSS feed metadata (I/O Bound)."""
     hasil_rss: List[Dict[str, Any]] = []
-    headers: Dict[str, str] = {'User-Agent': 'Mozilla/5.0', 'Accept': '*/*'}
 
     try:
-        response = requests.get(rss_url, headers=headers, timeout=3)
+        # Menggunakan session.get bukan requests.get
+        response = session.get(rss_url, timeout=GLOBAL_TIMEOUT)
         if response.status_code == 200:
             feed = feedparser.parse(response.content)
             entries = feed.entries[:limit_per_source]
@@ -92,7 +109,6 @@ def lengkapi_isi_berita(berita_item: Dict[str, Any]) -> Tuple[Dict[str, Any], st
 
     isi_teks, err = scrape_full_text(berita_item["link"], berita_item["sumber"])
     
-    # Proses pembersihan teks dilakukan di sini sebelum masuk ke database
     if isi_teks:
         isi_teks = bersihkan_teks(isi_teks)
         
