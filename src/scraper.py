@@ -7,8 +7,8 @@ import time
 from typing import List, Dict, Any, Tuple
 from pydantic import BaseModel, Field, ValidationError
 
-from src.database import init_db, simpan_banyak_berita
-from src.cleaner import bersihkan_teks
+from database import init_db, simpan_banyak_berita
+from cleaner import bersihkan_teks
 
 # ==========================================
 # 1. DATA CONTRACT (PYDANTIC)
