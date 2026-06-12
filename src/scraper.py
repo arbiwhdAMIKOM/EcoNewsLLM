@@ -6,8 +6,12 @@ import concurrent.futures
 import time
 from typing import List, Dict, Any, Tuple
 
-from database import init_db, simpan_banyak_berita
-from cleaner import bersihkan_teks
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.database import init_db, simpan_banyak_berita
+from src.cleaner import bersihkan_teks
 
 SOURCES: Dict[str, str] = {
     "CNBC Indonesia": "https://www.cnbcindonesia.com/news/rss",
@@ -149,6 +153,29 @@ def eksekusi_super_cepat(limit_per_source: int = 3) -> Tuple[List[Dict[str, Any]
                 hasil_final.append(item_selesai)
 
     return hasil_final, error_log
+
+def fetch_news(limit_per_source: int = 5) -> List[Dict[str, Any]]:
+    """
+    Fungsi adapter untuk menjembatani hulu (scraper) dan hilir (pipeline LLM).
+    1. Menjalankan fungsi inisialisasi database.
+    2. Mengeksekusi scraping paralel super cepat.
+    3. Mentransformasikan keys ke bahasa Inggris agar sesuai dengan run_pipeline.py.
+    """
+    init_db()
+    
+    hasil_mentah, _ = eksekusi_super_cepat(limit_per_source=limit_per_source)
+    
+    normalized_articles = []
+    for item in hasil_mentah:
+        normalized_articles.append({
+            "title": item.get("judul", ""),
+            "source": item.get("sumber", ""),
+            "url": item.get("link", ""),
+            "content": item.get("isi_berita", ""),
+            "published_at": item.get("waktu_ambil", "")
+        })
+        
+    return normalized_articles
 
 if __name__ == "__main__":
     init_db()
