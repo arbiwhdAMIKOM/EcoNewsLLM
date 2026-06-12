@@ -10,49 +10,60 @@ def build_news_analysis_prompt(article: dict) -> str:
     title = article.get("title", "")
     source = article.get("source", "")
     published_at = article.get("published_at", "")
-    content = article.get("content", "")[:1000]
+    content = article.get("content", "")[:800]
 
     prompt = f"""
-Kamu adalah analis berita ekonomi dan pasar keuangan senior yang bertugas melakukan ekstraksi data teks menjadi format JSON terstruktur yang valid.
+Kamu adalah analis berita ekonomi dan pasar keuangan.
 
-Analisis berita di bawah ini dengan mengikuti instruksi, aturan, dan batasan taksonomi yang telah ditentukan.
+Analisis HANYA jika berita memiliki hubungan langsung dengan ekonomi, bisnis, pasar modal, forex, crypto, komoditas, energi, perbankan, investasi, kebijakan fiskal/moneter, inflasi, perdagangan, industri, infrastruktur, atau pasar keuangan.
 
---- TAKSONOMI PILIHAN ---
-Pilih nilai untuk 'main_category' hanya dari daftar ini:
-{MAIN_CATEGORIES}
+Jangan memaksakan berita umum menjadi berita ekonomi.
 
-Pilih nilai untuk 'sentiment' hanya dari daftar ini:
-{SENTIMENTS}
-
-Pilih nilai untuk 'impact_level' hanya dari daftar ini:
-{IMPACT_LEVELS}
-
-Pilih nilai untuk 'affected_markets' bisa lebih dari satu dalam bentuk array, tetapi hanya dari daftar ini:
-{AFFECTED_MARKETS}
-
---- ATURAN ANALISIS & KONTEN ---
-1. Ringkasan berita ('summary') maksimal berisi 2 kalimat yang padat informasi.
-2. Jangan memberikan rekomendasi beli, jual, atau tahan terhadap instrumen apa pun.
-3. Jangan membuat prediksi masa depan yang bersifat pasti atau absolut.
-4. Gunakan kata-kata berbasis probabilitas seperti "berpotensi", "kemungkinan", "berpeluang", atau "dapat memengaruhi".
-5. Jika berita kurang jelas, di luar topik, atau tidak berdampak signifikan pada ekonomi, gunakan:
+--- ATURAN UTAMA ---
+1. Jika berita tidak relevan langsung dengan ekonomi/pasar, isi:
    - main_category: "lainnya"
    - sentiment: "netral"
    - impact_level: "rendah"
-6. Tentukan 'impact_score' dengan nilai integer dari 0 sampai 10:
-   - 0 sampai 3 = rendah
-   - 4 sampai 6 = sedang
-   - 7 sampai 10 = tinggi
-7. Field 'main_cause' harus berupa frasa singkat yang spesifik dan kontekstual berdasarkan isi berita.
-8. Field 'main_cause' tidak boleh memakai label umum seperti "inflasi", "suku bunga", atau "geopolitik" saja.
-9. Contoh main_cause yang baik:
-   - "Aksi profit taking investor"
-   - "Eskalasi konflik di Timur Tengah"
-   - "Ekspektasi suku bunga tinggi The Fed"
-   - "Pelemahan permintaan global"
-   - "Kenaikan harga minyak mentah"
-10. Pada field 'impact_explanation', jelaskan kemungkinan dampak berita terhadap pasar/sektor yang terdampak, bukan prediksi pasti.
-11. Pada field 'confidence_score', isi angka desimal 0 sampai 1 untuk menunjukkan tingkat keyakinan analisis.
+   - impact_score: 0
+   - affected_markets: []
+   - main_cause: "Tidak relevan langsung dengan ekonomi atau pasar keuangan"
+   - impact_explanation: "Berita ini tidak dianalisis lebih lanjut karena tidak memiliki hubungan langsung dengan ekonomi, bisnis, pasar keuangan, komoditas, atau kebijakan makro."
+
+2. Jangan mengaitkan berita non-ekonomi ke IHSG, arus modal asing, rupiah, emas, minyak, atau pasar lain jika tidak disebutkan jelas.
+
+3. Berita politik, hukum, kriminal, artis, olahraga, hiburan, atau berita umum hanya boleh dianalisis jika isi berita menyebut dampak ekonomi/pasar secara eksplisit.
+
+4. Fokus pada berita yang berdampak sedang sampai tinggi.
+   Jika dampak ekonomi sangat kecil atau hanya informasi ringan, gunakan:
+   - impact_level: "rendah"
+   - impact_score: 0 sampai 3
+   - affected_markets: []
+
+5. Jangan memberi rekomendasi beli, jual, atau tahan.
+6. Jangan membuat prediksi pasti.
+7. Gunakan kata "berpotensi", "kemungkinan", "dapat memengaruhi", atau "berpeluang".
+8. Ringkasan maksimal 2 kalimat.
+9. main_cause harus spesifik dan sesuai isi berita.
+10. affected_markets boleh kosong [] jika dampak pasar tidak jelas.
+
+--- TAKSONOMI ---
+main_category hanya boleh dari:
+{MAIN_CATEGORIES}
+
+sentiment hanya boleh dari:
+{SENTIMENTS}
+
+impact_level hanya boleh dari:
+{IMPACT_LEVELS}
+
+affected_markets hanya boleh dari:
+{AFFECTED_MARKETS}
+
+--- SKALA IMPACT SCORE ---
+0 = tidak relevan / tidak ada dampak ekonomi jelas
+1-3 = rendah
+4-6 = sedang
+7-10 = tinggi
 
 --- DATA BERITA ---
 Judul: {title}
@@ -61,19 +72,19 @@ Tanggal Publish: {published_at}
 Isi Berita: {content}
 
 --- FORMAT OUTPUT ---
-Kembalikan hasil analisis HANYA dalam format JSON valid.
-Jangan tambahkan teks penjelasan, markdown, atau tanda ```json.
+Kembalikan HANYA JSON valid. Jangan pakai markdown. Jangan pakai ```json.
 
 {{
-  "summary": "Ringkasan berita maksimal 2 kalimat",
-  "main_category": "Isi dengan satu pilihan dari MAIN_CATEGORIES",
-  "sentiment": "Isi dengan satu pilihan dari SENTIMENTS",
-  "impact_level": "Isi dengan satu pilihan dari IMPACT_LEVELS",
+  "summary": "Ringkasan maksimal 2 kalimat",
+  "main_category": "satu pilihan dari MAIN_CATEGORIES",
+  "sentiment": "satu pilihan dari SENTIMENTS",
+  "impact_level": "satu pilihan dari IMPACT_LEVELS",
   "impact_score": 0,
-  "main_cause": "Frasa singkat penyebab utama yang spesifik dan kontekstual",
-  "affected_markets": ["Pilihan 1 dari AFFECTED_MARKETS", "Pilihan 2 dari AFFECTED_MARKETS"],
-  "impact_explanation": "Penjelasan kemungkinan dampak berita terhadap pasar atau sektor yang terdampak",
+  "main_cause": "Penyebab utama yang spesifik",
+  "affected_markets": [],
+  "impact_explanation": "Penjelasan kemungkinan dampak atau alasan tidak relevan",
   "confidence_score": 0.0
 }}
 """
     return prompt.strip()
+

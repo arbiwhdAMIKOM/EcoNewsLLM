@@ -131,7 +131,93 @@ def extract_json(text: str) -> dict | None:
         return None
 
 
+# ============================================================
+# FILTER ANTI-HALUSINASI EKONOMI
+# Bagian ini mencegah berita umum/non-ekonomi dipaksa jadi berita pasar.
+# ============================================================
+ECONOMIC_RELEVANCE_KEYWORDS = [
+    # saham / pasar modal
+    "ihsg", "saham", "bursa", "emiten", "investor", "obligasi", "reksa dana",
+    "pasar modal", "wall street", "nasdaq", "dow jones", "s&p",
+
+    # forex / makro moneter
+    "rupiah", "dolar", "usd", "kurs", "valas", "mata uang", "bank indonesia",
+    "the fed", "suku bunga", "inflasi", "deflasi", "cadangan devisa",
+
+    # crypto
+    "bitcoin", "btc", "ethereum", "eth", "crypto", "kripto", "aset digital",
+
+    # komoditas
+    "emas", "gold", "xau", "minyak", "gas", "batu bara", "batubara",
+    "nikel", "tembaga", "cpo", "komoditas",
+
+    # ekonomi makro / kebijakan
+    "ekonomi", "pdb", "pertumbuhan ekonomi", "ekspor", "impor",
+    "neraca perdagangan", "pajak", "apbn", "subsidi", "investasi", "pma", "pmdn",
+
+    # bisnis / korporasi
+    "laba", "rugi", "pendapatan", "revenue", "profit", "dividen", "ipo",
+    "akuisisi", "merger", "startup", "umkm", "industri", "manufaktur",
+    "retail", "ritel", "perbankan", "bank",
+
+    # sektor ekonomi
+    "energi", "transportasi", "logistik", "properti", "konstruksi",
+    "infrastruktur", "pertambangan", "proyek strategis nasional", "psn", "psel",
+]
+
+NON_ECONOMIC_STRONG_KEYWORDS = [
+    "artis", "seleb", "film", "musik", "konser", "olahraga", "sepak bola",
+    "viral", "gosip", "kriminal", "pembunuhan", "kecelakaan", "penjara",
+    "dipenjara", "pidana", "putusan hakim", "sidang", "eks presiden",
+]
+
+
+def is_direct_economic_article(article: dict) -> bool:
+    title = article.get("title", "")
+    content = article.get("content", "")
+    source = article.get("source", "")
+
+    text = f"{title} {content} {source}".lower()
+
+    economic_score = sum(1 for keyword in ECONOMIC_RELEVANCE_KEYWORDS if keyword in text)
+    has_strong_non_economic = any(keyword in text for keyword in NON_ECONOMIC_STRONG_KEYWORDS)
+
+    # Tidak ada sinyal ekonomi sama sekali = jangan dianalisis LLM
+    if economic_score == 0:
+        return False
+
+    # Kalau dominan non-ekonomi dan sinyal ekonomi lemah = skip
+    if has_strong_non_economic and economic_score < 2:
+        return False
+
+    return True
+
+
+def non_economic_analysis(article: dict) -> dict:
+    title = article.get("title", "")
+
+    return {
+        "summary": title or "Berita tidak memiliki ringkasan ekonomi yang relevan.",
+        "main_category": "lainnya",
+        "sentiment": "netral",
+        "impact_level": "rendah",
+        "impact_score": 0,
+        "main_cause": "Tidak relevan langsung dengan ekonomi atau pasar keuangan",
+        "affected_markets": [],
+        "impact_explanation": (
+            "Berita ini tidak dianalisis lebih lanjut karena tidak memiliki hubungan langsung "
+            "dengan ekonomi, bisnis, pasar keuangan, komoditas, atau kebijakan makro."
+        ),
+        "confidence_score": 1.0,
+        "status": "skipped_non_economic",
+    }
+
+
 def fallback_rule_analysis(article: dict) -> dict:
+    # Guard pertama: fallback juga tidak boleh memaksa berita non-ekonomi.
+    if not is_direct_economic_article(article):
+        return non_economic_analysis(article)
+
     text = " ".join(
         [
             article.get("title", ""),
@@ -142,8 +228,8 @@ def fallback_rule_analysis(article: dict) -> dict:
     category = "lainnya"
     sentiment = "netral"
     affected_markets = []
-    impact_score = 2
-    main_cause = "Konteks ekonomi umum"
+    impact_score = 0
+    main_cause = "Konteks ekonomi belum spesifik"
 
     if any(word in text for word in ["ihsg", "saham", "bursa", "emiten", "reksa dana", "obligasi"]):
         category = "saham & pasar modal"
@@ -157,9 +243,9 @@ def fallback_rule_analysis(article: dict) -> dict:
         affected_markets.append("saham domestik (IHSG)")
         impact_score += 2
 
-    if any(word in text for word in ["rupiah", "dolar", "usd", "forex", "kurs", "valas"]):
+    if any(word in text for word in ["rupiah", "dolar", "usd", "forex", "kurs", "valas", "mata uang"]):
         category = "forex & valuta asing"
-        main_cause = "Pergerakan nilai tukar rupiah terhadap dolar AS"
+        main_cause = "Pergerakan nilai tukar atau mata uang"
         affected_markets.extend([
             "mata uang rupiah (IDR)",
             "mata uang dolar AS (USD)",
@@ -215,7 +301,7 @@ def fallback_rule_analysis(article: dict) -> dict:
         ])
         impact_score += 3
 
-    if any(word in text for word in ["pdb", "makro", "ekonomi domestik"]):
+    if any(word in text for word in ["pdb", "makro", "ekonomi domestik", "pertumbuhan ekonomi"]):
         category = "kebijakan & makro"
         main_cause = "Perubahan indikator makroekonomi"
         affected_markets.extend([
@@ -224,15 +310,17 @@ def fallback_rule_analysis(article: dict) -> dict:
         ])
         impact_score += 2
 
+    # Geopolitik hanya dinaikkan dampaknya jika ada konteks pasar/ekonomi/komoditas.
     if any(word in text for word in ["perang", "konflik", "geopolitik", "sanksi", "israel", "iran", "rusia", "ukraina", "timur tengah"]):
-        category = "geopolitik & perang"
-        main_cause = "Eskalasi konflik geopolitik"
-        affected_markets.extend([
-            "rantai pasok global (global supply chain)",
-            "komoditas energi (minyak bumi/gas/batu bara)",
-            "komoditas logam mulia (emas/XAU/perak)",
-        ])
-        impact_score += 4
+        if any(word in text for word in ["minyak", "gas", "emas", "rupiah", "dolar", "pasar", "ekonomi", "komoditas", "ekspor", "impor", "rantai pasok"]):
+            category = "geopolitik & perang"
+            main_cause = "Eskalasi konflik geopolitik yang berpotensi memengaruhi pasar"
+            affected_markets.extend([
+                "rantai pasok global (global supply chain)",
+                "komoditas energi (minyak bumi/gas/batu bara)",
+                "komoditas logam mulia (emas/XAU/perak)",
+            ])
+            impact_score += 4
 
     if any(word in text for word in ["amerika", "china", "tiongkok", "eropa", "resesi global", "ekonomi global"]):
         category = "ekonomi global"
@@ -243,7 +331,7 @@ def fallback_rule_analysis(article: dict) -> dict:
         ])
         impact_score += 2
 
-    if any(word in text for word in ["umkm", "retail", "manufaktur", "perusahaan", "korporasi", "industri", "bisnis"]):
+    if any(word in text for word in ["umkm", "retail", "ritel", "manufaktur", "perusahaan", "korporasi", "industri", "bisnis", "laba", "pendapatan"]):
         category = "bisnis & korporasi"
         main_cause = "Perubahan kinerja sektor bisnis dan korporasi"
         affected_markets.extend([
@@ -252,30 +340,23 @@ def fallback_rule_analysis(article: dict) -> dict:
         ])
         impact_score += 2
 
+    if any(word in text for word in ["psel", "proyek strategis nasional", "psn", "infrastruktur", "konstruksi"]):
+        category = "bisnis & korporasi"
+        main_cause = "Pengembangan proyek infrastruktur strategis"
+        affected_markets.extend([
+            "saham infrastruktur & konstruksi",
+            "sektor manufaktur & industri pabrik",
+        ])
+        impact_score += 2
+
     negative_words = [
-        "melemah",
-        "turun",
-        "anjlok",
-        "tertekan",
-        "konflik",
-        "perang",
-        "krisis",
-        "rugi",
-        "crash",
-        "melambat",
-        "resesi",
+        "melemah", "turun", "anjlok", "tertekan", "konflik", "perang",
+        "krisis", "rugi", "crash", "melambat", "resesi",
     ]
 
     positive_words = [
-        "menguat",
-        "naik",
-        "rebound",
-        "pulih",
-        "positif",
-        "optimis",
-        "untung",
-        "tumbuh",
-        "meningkat",
+        "menguat", "naik", "rebound", "pulih", "positif", "optimis",
+        "untung", "tumbuh", "meningkat",
     ]
 
     if any(word in text for word in negative_words):
@@ -294,8 +375,9 @@ def fallback_rule_analysis(article: dict) -> dict:
 
     affected_markets = list(dict.fromkeys(affected_markets))
 
+    # Tidak ada market jelas = jangan dipaksa jadi arus modal asing.
     if not affected_markets:
-        affected_markets = ["arus modal asing (capital inflow/outflow)"]
+        return non_economic_analysis(article)
 
     summary = article.get("content") or article.get("title") or "Ringkasan belum tersedia."
 
@@ -326,15 +408,12 @@ def validate_and_fix_result(result: dict) -> dict:
         result["impact_level"] = "rendah"
 
     if not isinstance(result.get("affected_markets"), list):
-        result["affected_markets"] = ["arus modal asing (capital inflow/outflow)"]
+        result["affected_markets"] = []
 
     result["affected_markets"] = [
         market for market in result["affected_markets"]
         if market in AFFECTED_MARKETS
     ]
-
-    if not result["affected_markets"]:
-        result["affected_markets"] = ["arus modal asing (capital inflow/outflow)"]
 
     try:
         result["impact_score"] = int(result.get("impact_score", 0))
@@ -342,6 +421,18 @@ def validate_and_fix_result(result: dict) -> dict:
         result["impact_score"] = 0
 
     result["impact_score"] = min(max(result["impact_score"], 0), 10)
+
+    # Kalau kategori lainnya, jangan dipaksa punya market terdampak.
+    if result.get("main_category") == "lainnya":
+        result["affected_markets"] = []
+        result["impact_score"] = min(result["impact_score"], 2)
+
+    if result["impact_score"] <= 3:
+        result["impact_level"] = "rendah"
+    elif result["impact_score"] <= 6:
+        result["impact_level"] = "sedang"
+    else:
+        result["impact_level"] = "tinggi"
 
     try:
         result["confidence_score"] = float(result.get("confidence_score", 0))
@@ -357,14 +448,23 @@ def validate_and_fix_result(result: dict) -> dict:
         result["main_cause"] = "Penyebab utama belum dapat diidentifikasi secara spesifik."
 
     if not result.get("impact_explanation"):
-        result["impact_explanation"] = (
-            "Berita ini dapat memengaruhi pasar atau sektor terkait, tetapi dampaknya perlu dilihat "
-            "sebagai kemungkinan, bukan prediksi pasti."
-        )
+        if result.get("affected_markets"):
+            result["impact_explanation"] = (
+                "Berita ini dapat memengaruhi pasar atau sektor terkait, tetapi dampaknya "
+                "perlu dilihat sebagai kemungkinan, bukan prediksi pasti."
+            )
+        else:
+            result["impact_explanation"] = (
+                "Berita ini tidak memiliki dampak pasar yang cukup jelas berdasarkan isi berita."
+            )
 
     return result
 
 
+# ============================================================
+# BAGIAN ANALYZE / ANALISIS LLM
+# Bagian ini yang menjalankan Gemini, fallback, dan analisis batch.
+# ============================================================
 def analyze_with_gemini(article: dict) -> dict | None:
     if not GEMINI_API_KEY:
         return None
@@ -399,6 +499,13 @@ def analyze_with_gemini(article: dict) -> dict | None:
 
 
 def analyze_article(article: dict) -> dict:
+    # Guard kedua: berita non-ekonomi langsung ditandai skip, tidak dikirim ke Gemini.
+    if not is_direct_economic_article(article):
+        return {
+            **article,
+            **non_economic_analysis(article),
+        }
+
     llm_result = analyze_with_gemini(article)
 
     if llm_result is None:
@@ -409,6 +516,7 @@ def analyze_article(article: dict) -> dict:
     return {
         **article,
         **llm_result,
+        "status": "analyzed",
     }
 
 
