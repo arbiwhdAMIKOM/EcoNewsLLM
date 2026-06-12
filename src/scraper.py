@@ -5,31 +5,10 @@ import datetime
 import concurrent.futures
 import time
 from typing import List, Dict, Any, Tuple
-from pydantic import BaseModel, Field, ValidationError
 
 from database import init_db, simpan_banyak_berita
 from cleaner import bersihkan_teks
 
-# ==========================================
-# 1. DATA CONTRACT (PYDANTIC)
-# ==========================================
-class ArticleSchema(BaseModel):
-    """
-    Skema validasi standar untuk menjembatani output Scraper 
-    sebelum masuk ke LLM / Database.
-    """
-    title: str = Field(..., alias="judul")
-    source: str = Field(..., alias="sumber")
-    url: str = Field(..., alias="link")
-    published_at: str = Field(..., alias="waktu_ambil")
-    content: str = Field(..., alias="isi_berita")
-
-    class Config:
-        populate_by_name = True
-
-# ==========================================
-# 2. KONFIGURASI & OPTIMASI JARINGAN
-# ==========================================
 SOURCES: Dict[str, str] = {
     "CNBC Indonesia": "https://www.cnbcindonesia.com/news/rss",
     "Antara News": "https://www.antaranews.com/rss/ekonomi.xml",
@@ -48,7 +27,7 @@ SOURCES: Dict[str, str] = {
 
 session = requests.Session()
 
-# OPTIMASI: Header tingkat lanjut agar tidak dikira bot oleh Cloudflare/Akamai
+# 1. OPTIMASI: Header tingkat lanjut agar tidak dikira bot oleh Cloudflare/Akamai
 session.headers.update({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -61,15 +40,13 @@ session.headers.update({
     'Sec-Fetch-Site': 'cross-site',
 })
 
-# OPTIMASI: Pangkas batas waktu agar sistem tidak tersandera situs lemot
+# 2. OPTIMASI: Pangkas batas waktu agar sistem tidak tersandera situs lemot
 GLOBAL_TIMEOUT = 2
 
-# ==========================================
-# 3. FUNGSI SCRAPING INTI
-# ==========================================
 def scrape_full_text(url: str, source_name: str) -> Tuple[str, str]:
     """Ekstraksi DOM HTML artikel spesifik berdasarkan target media."""
     try:
+        # Menggunakan session.get bukan requests.get
         response = session.get(url, timeout=GLOBAL_TIMEOUT)
         if response.status_code != 200:
             return "", f"HTTP {response.status_code}"
@@ -98,6 +75,7 @@ def ambil_daftar_artikel_dari_rss(name: str, rss_url: str, limit_per_source: int
     hasil_rss: List[Dict[str, Any]] = []
 
     try:
+        # Menggunakan session.get bukan requests.get
         response = session.get(rss_url, timeout=GLOBAL_TIMEOUT)
         if response.status_code == 200:
             feed = feedparser.parse(response.content)
@@ -172,32 +150,6 @@ def eksekusi_super_cepat(limit_per_source: int = 3) -> Tuple[List[Dict[str, Any]
 
     return hasil_final, error_log
 
-# ==========================================
-# 4. FUNGSI INTEGRASI LLM (CLEAN CODE)
-# ==========================================
-def fetch_news(limit_per_source: int = 1) -> List[Dict[str, Any]]:
-    """
-    Fungsi utama yang akan dipanggil oleh modul LLM temanmu.
-    Sudah divalidasi menggunakan Pydantic agar terhindar dari missing keys.
-    """
-    berita_list, logs = eksekusi_super_cepat(limit_per_source=limit_per_source)
-    normalized_articles = []
-
-    for item in berita_list:
-        try:
-            # Pydantic otomatis memetakan 'judul' ke 'title', 'waktu_ambil' ke 'published_at', dst.
-            validated_article = ArticleSchema(**item)
-            
-            # Kembalikan sebagai dictionary standar bahasa Inggris yang rapi untuk LLM
-            normalized_articles.append(validated_article.model_dump(by_alias=False))
-        except ValidationError as e:
-            print(f"[WARNING] Data tidak valid dilewati. Error: {e}")
-
-    return normalized_articles
-
-# ==========================================
-# 5. MAIN EXECUTION
-# ==========================================
 if __name__ == "__main__":
     init_db()
     mulai_total = time.time()
@@ -206,7 +158,6 @@ if __name__ == "__main__":
     print("MEMULAI PIPELINE EKSTRAKSI DATA BERITA EKONOMI")
     print("============================================================")
 
-    # Test jalan lokal
     hasil, laporan_error = eksekusi_super_cepat(limit_per_source=2)
     waktu_scraping = time.time() - mulai_total
 
