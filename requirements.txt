@@ -1,9 +1,22 @@
-google-genai
-python-dotenv
-pydantic
-requests
-beautifulsoup4
-feedparser
-pandas
-lxml
-streamlit
+# ==========================================
+# DATA ENGINEERING & SCRAPER (Orang A)
+# ==========================================
+feedparser==6.0.11
+requests==2.32.3
+beautifulsoup4==4.12.3
+
+# ==========================================
+# DATA CONTRACT & VALIDATION (Semua)
+# ==========================================
+pydantic==2.10.6
+
+# ==========================================
+# AI INTEGRATION & LLM (Orang B)
+# ==========================================
+google-generativeai==0.8.4
+python-dotenv==1.0.1
+
+# ==========================================
+# USER INTERFACE DASHBOARD
+# ==========================================
+streamlit==1.42.0
