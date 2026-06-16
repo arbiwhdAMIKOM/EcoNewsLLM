@@ -9,8 +9,8 @@ from src.analyzer import analyze_articles
 
 
 MAX_SECONDS = 15
-MAX_ANALYZE = 10
-MIN_IMPACT_SCORE_TO_SHOW = 4
+MAX_ANALYZE = 5
+MIN_IMPACT_SCORE_TO_SHOW = 5
 
 
 DIRECT_ECONOMIC_KEYWORDS = [
@@ -179,7 +179,7 @@ def main():
     print("Mengambil berita dari scraper...")
     scraper_start = time.perf_counter()
 
-    articles = fetch_news(limit_per_source=5)
+    articles = fetch_news(limit_per_source=3)
 
     scraper_end = time.perf_counter()
     scraper_duration = scraper_end - scraper_start
@@ -194,10 +194,6 @@ def main():
     for article in articles:
         article["published_at"] = get_article_date(article)
 
-    # ============================================================
-    # FILTER SEBELUM LLM
-    # Berita non-ekonomi, low value, dan tidak berdampak tidak masuk Gemini.
-    # ============================================================
     articles_to_analyze = [
         article for article in articles
         if should_send_to_llm(article)
@@ -212,10 +208,6 @@ def main():
         print("Gemini tidak dijalankan, token aman.")
         return
 
-    # ============================================================
-    # BAGIAN ANALYZE / ANALISIS LLM
-    # Hanya kandidat ekonomi berdampak yang masuk Gemini.
-    # ============================================================
     print("\nMenganalisis berita ekonomi berdampak dengan Gemini...")
     llm_start = time.perf_counter()
 
@@ -224,10 +216,6 @@ def main():
     llm_end = time.perf_counter()
     llm_duration = llm_end - llm_start
 
-    # ============================================================
-    # FILTER SETELAH LLM
-    # Yang tampil hanya dampak sedang - tinggi.
-    # ============================================================
     final_results = [
         item for item in results
         if is_medium_or_high_impact(item)
