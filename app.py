@@ -109,7 +109,7 @@ with st.sidebar:
         "Sistem ini menggunakan feed khusus ekonomi makro dan bursa sehingga menghemat kuota token Anda secara maksimal."
     )
 
-run_button = st.button("🚀 Ambil & Analisis Berita")
+run_button = st.button("Ambil & Analisis Berita")
 
 if run_button:
     total_start = time.perf_counter()
@@ -253,4 +253,4 @@ if run_button:
             st.write(f"**{i}. {art.get('title')}** — _{art.get('source')}_")
 
 else:
-    st.info("Klik tombol **🚀 Ambil & Analisis Berita** untuk memulai pipeline.")
+    st.info("Klik tombol ** Ambil & Analisis Berita** untuk memulai pipeline.")
