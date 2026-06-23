@@ -1,4 +1,4 @@
-from taxonomy import (
+from src.taxonomy import (
     MAIN_CATEGORIES,
     SENTIMENTS,
     IMPACT_LEVELS,
