@@ -1,3 +1,4 @@
+import google.generativeai as genai
 import os
 import json
 import re
@@ -6,11 +7,10 @@ import concurrent.futures
 from typing import List, Literal
 
 from dotenv import load_dotenv
-from google import genai
 from pydantic import BaseModel, Field
 
-from prompts import build_news_analysis_prompt
-from taxonomy import (
+from src.prompts import build_news_analysis_prompt
+from src.taxonomy import (
     MAIN_CATEGORIES,
     SENTIMENTS,
     IMPACT_LEVELS,
@@ -442,15 +442,20 @@ def analyze_with_gemini(article: dict, max_retries: int = 3) -> dict | None:
     if not GEMINI_API_KEY:
         return None
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    # 1. Konfigurasi library lama (google-generativeai)
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+    # 2. Inisialisasi model (bukan Client)
+    model = genai.GenerativeModel(GEMINI_MODEL)
+    
     prompt = build_news_analysis_prompt(article)
 
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config={
+            # 3. Gunakan model.generate_content langsung
+            response = model.generate_content(
+                prompt,
+                generation_config={
                     "temperature": 0.0,
                     "max_output_tokens": 1024,
                     "response_mime_type": "application/json",
@@ -458,13 +463,8 @@ def analyze_with_gemini(article: dict, max_retries: int = 3) -> dict | None:
                 },
             )
 
-            if hasattr(response, "parsed") and response.parsed:
-                if isinstance(response.parsed, NewsAnalysis):
-                    return response.parsed.model_dump()
-                if isinstance(response.parsed, dict):
-                    return NewsAnalysis.model_validate(response.parsed).model_dump()
-
-            return NewsAnalysis.model_validate_json(response.text).model_dump()
+            # 4. Parsing response (karena tipe MIME JSON, response.text adalah JSON)
+            return json.loads(response.text)
 
         except Exception as error:
             error_msg = str(error).lower()
