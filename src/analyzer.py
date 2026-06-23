@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 from google import genai
 from pydantic import BaseModel, Field
 
-from src.prompts import build_news_analysis_prompt
-from src.taxonomy import (
+from prompts import build_news_analysis_prompt
+from taxonomy import (
     MAIN_CATEGORIES,
     SENTIMENTS,
     IMPACT_LEVELS,
