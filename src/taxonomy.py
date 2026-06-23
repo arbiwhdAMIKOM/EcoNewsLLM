@@ -7,9 +7,9 @@ MAIN_CATEGORIES = [
     "geopolitik & perang",
     "ekonomi global",
     "bisnis & korporasi",
+    "pertanian & pangan",    # <-- baru
     "lainnya",
 ]
-
 
 SENTIMENTS = [
     "positif",
@@ -17,13 +17,11 @@ SENTIMENTS = [
     "netral",
 ]
 
-
 IMPACT_LEVELS = [
     "rendah",
     "sedang",
     "tinggi",
 ]
-
 
 AFFECTED_MARKETS = [
     "saham domestik (IHSG)",

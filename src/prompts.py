@@ -1,83 +1,84 @@
-"""
-prompts.py  —  EcoNews LLM  (v4)
-Perubahan dari v3:
-  - Tambah instruksi "MATRIX ANTI-HALUSINASI KOMODITAS": whitelist berbasis kategori.
-    Komoditas energi/logam mulia HANYA boleh muncul jika main_category = komoditas & energi
-    atau geopolitik & perang (via jalur transmisi minyak/emas global).
-  - Batas affected_markets: maks 3 (bukan 2) — tetap ketat tapi tidak memotong
-    berita makro multi-pasar yang legitimate (contoh: BI Rate → rupiah + obligasi + arus modal)
-  - Tambah contoh negatif eksplisit untuk berita agrikultur/kebijakan domestik
-    agar Gemini tidak "mengarang" jalur transmisi ke emas/energi
-"""
-
+from src.taxonomy import (
+    MAIN_CATEGORIES,
+    SENTIMENTS,
+    IMPACT_LEVELS,
+    AFFECTED_MARKETS,
+)
 
 def build_news_analysis_prompt(article: dict) -> str:
-    title    = article.get("title", "")
-    source   = article.get("source", "")
-    pub_date = article.get("published_at", "")
-    content  = article.get("content", "")[:600]
+    title = article.get("title", "")
+    source = article.get("source", "")
+    published_at = article.get("published_at", "")
+    content = article.get("content", "")[:800]
 
-    prompt = f"""Kamu adalah sistem klasifikasi berita keuangan otomatis. Labeli berita berikut secara cepat dan objektif.
+    prompt = f"""
+Anda adalah Analis Intelijen Finansial Senior yang SANGAT KETAT, OBJEKTIF, dan TIDAK MUDAH TERTIPU.
+Tugas Anda adalah mengekstrak data dari teks berita mentah menjadi format terstruktur.
 
-## ATURAN SENTIMEN — ISOLASI DOMESTIK VS GLOBAL
-Nilai sentimen berdasarkan DAMPAK LANGSUNG ke pasar/ekonomi Indonesia saja:
-- "positif" → ada indikator domestik membaik (IHSG naik, Rupiah menguat, data ekonomi RI bagus)
-- "negatif" → ada indikator domestik memburuk (IHSG turun, Rupiah melemah, PHK massal di RI)
-- "netral"  → dampak ke Indonesia tidak eksplisit, atau berita murni informatif
-PENTING: Berita geopolitik/ekonomi global hanya ubah sentimen ke negatif jika ada kalimat eksplisit dampak ke Indonesia. "Wall Street turun" saja = NETRAL untuk Indonesia.
+--- ATURAN MUTLAK (ANTI-HALUSINASI) ---
 
-## MATRIX ANTI-HALUSINASI KOMODITAS (WAJIB DIIKUTI)
-Komoditas energi (minyak/gas/batu bara) dan logam mulia (emas/perak) adalah pasar GLOBAL.
-Harga mereka diset oleh dinamika internasional — BUKAN kebijakan domestik Indonesia.
+1. **Klasifikasi Sektor HARUS TEPAT**:
+   - Batu bara, minyak, gas, energi terbarukan → **komoditas & energi**
+   - Beras, jagung, kedelai, gandum, daging, ayam, ikan, CPO (pangan), swasembada pangan → **pertanian & pangan**
+   - Pakaian, tekstil, ritel, barang konsumsi non-makanan → **bisnis & korporasi**
+   - Jika ragu, gunakan **lainnya** daripada memaksakan ke kategori yang salah.
 
-ATURAN KETAT:
-- "komoditas energi" dan "komoditas logam mulia" HANYA boleh masuk affected_markets jika:
-  (a) main_category = "komoditas & energi", ATAU
-  (b) main_category = "geopolitik & perang" DAN teks menyebut minyak/emas secara eksplisit
-- Untuk semua kategori lain (kebijakan & makro, bisnis & korporasi, ekonomi global, dll):
-  DILARANG memasukkan komoditas energi atau logam mulia ke affected_markets
+2. **LARANGAN MENGHUBUNGKAN BERITA DOMESTIK RINGAN DENGAN PASAR GLOBAL**:
+   - Jangan masukkan "Wall Street", "saham global", "emas", "minyak dunia", atau "rantai pasok global" ke dalam `affected_markets` jika berita hanya membahas kebijakan lokal, program dalam negeri, atau insiden kecil tanpa dampak internasional yang jelas.
+   - Contoh: Program nelayan lokal TIDAK mempengaruhi harga minyak dunia atau emas.
 
-CONTOH KESALAHAN FATAL (JANGAN DILAKUKAN):
-✗ Berita "cetak sawah 1 juta hektar" → affected_markets: ["komoditas logam mulia", "komoditas energi"]
-  (Sawah tidak punya jalur transmisi ke harga emas atau batu bara global)
-✗ Berita "program makan bergizi gratis" → affected_markets: ["komoditas energi"]
-  (Program gizi sekolah tidak menggerakkan harga minyak)
-✗ Berita "kebijakan transmigrasi" → affected_markets: ["komoditas logam mulia"]
-  (Perpindahan penduduk tidak memengaruhi harga emas global)
+3. **SENTIMEN BERITA PERANG / KONFLIK**:
+   - Jika berita membahas eskalasi perang, serangan militer, atau konflik bersenjata, sentimen WAJIB **negatif** (karena meningkatkan ketidakpastian global).
+   - Kecuali ada pernyataan resmi dari pejabat tinggi yang menyatakan "optimis", "aman", atau "stabil" dalam konteks tersebut, maka boleh positif (mengikuti aturan bias pejabat).
 
-CONTOH BENAR:
-✓ Berita "OPEC potong produksi minyak" → affected_markets: ["komoditas energi (minyak bumi/gas/batu bara)"]
-✓ Berita "konflik Iran-Israel eskalasi" → affected_markets: ["komoditas logam mulia", "komoditas energi"]
-✓ Berita "sawah/pertanian/pangan" → affected_markets: ["komoditas agrikultur (CPO/kopi/gandum/karet)", "daya beli & konsumsi masyarakat"]
+4. **BATASAN SKOR UNTUK HUMAN INTEREST / RELASI PEJABAT**:
+   - Jika berita hanya berisi pertemuan santai, traktiran, atau pernyataan basa-basi antar pejabat TANPA kebijakan baru atau data angka, maka impact_score MAKSIMAL 4 (sedang) dan jangan masukkan pasar global.
 
-## BATAS AFFECTED_MARKETS
-Pilih MAKSIMAL 3 pasar yang paling langsung terdampak.
-Prioritaskan pasar yang TERSEBUT EKSPLISIT dalam teks. Jika ragu, kosongkan [].
+5. **FILTER POLITIK MURNI**:
+   - Wacana pemilu, masa jabatan, koalisi partai tanpa stimulus fiskal/ekonomi nyata → kategori "lainnya", skor 0, netral.
 
-## ATURAN ANTI-HALUSINASI UMUM
-- Berita politik murni (pernyataan tokoh, opini pemilu, isu jabatan) → main_category="lainnya", impact_score=0, affected_markets=[]
-- Berita bukan ekonomi/bisnis/keuangan → main_category="lainnya", impact_score=0, affected_markets=[]
-- impact_score 7-10 HANYA untuk peristiwa makro sistemik (keputusan BI Rate, resesi, krisis keuangan)
-- summary: maks 2 kalimat ringkas
-- main_cause: 1 frasa spesifik (contoh: "Stimulus fiskal Rp26T pemerintah", "Keputusan BI Rate naik 25bps")
+6. **KALIBRASI CONFIDENCE SCORE**:
+   - Ada data angka (%, Rp, USD, ton, dll.) → 0.8–1.0
+   - Hanya opini/inferensi → 0.4–0.6
+   - Non-ekonomi → 0.0–0.3
 
-## SKALA IMPACT SCORE
-0   = Tidak ada kaitan ekonomi / berita politik murni
-1-3 = Info ringan, tidak langsung menggerakkan pasar
-4-6 = Dampak nyata pada satu sektor spesifik
-7-10 = Dampak makro sistemik, mengubah tren nasional/global
+7. **BAHASA OUTPUT**: Semua teks (summary, main_cause, impact_explanation) WAJIB dalam bahasa Indonesia yang baku.
 
-## RUBRIK CONFIDENCE SCORE
-0.9-1.0 = Teks sangat eksplisit: ada angka, nama instrumen, arah pergerakan jelas
-0.7-0.8 = Cukup jelas tapi ada 1-2 ambiguitas minor (misal: tidak ada angka spesifik)
-0.5-0.6 = Teks ambigu atau berita terlalu singkat
-0.3-0.4 = Inferensi tinggi, hampir menebak
-0.0-0.2 = Tidak ada informasi ekonomi yang dapat diandalkan
+--- CONTOH KASUS (PANDUAN) ---
+- Berita "43 Kontainer Pakaian Bekas Impor" → kategori "bisnis & korporasi", affected_markets: ["sektor retail & perdagangan eceran"], impact_score 2-3.
+- Berita "Harga Patokan Batu Bara DMO" → kategori "komoditas & energi", affected_markets: ["komoditas energi (minyak bumi/gas/batu bara)"].
+- Berita "Program Swasembada Protein Nelayan" → kategori "pertanian & pangan", affected_markets: ["komoditas agrikultur (CPO/kopi/gandum/karet)"], jangan sentuh energi/emas.
+- Berita "Menkeu Ditraktir Bos BI" → kategori "lainnya" atau "kebijakan & makro" (jika ada implikasi stabilitas), impact_score ≤ 4, affected_markets: [] atau hanya domestik.
 
-## DATA BERITA
-Judul  : {title}
-Sumber : {source}
-Tanggal: {pub_date}
-Konten : {content}"""
+--- TAKSONOMI ---
+main_category: {MAIN_CATEGORIES}
+sentiment: {SENTIMENTS}
+impact_level: {IMPACT_LEVELS}
+affected_markets: {AFFECTED_MARKETS}
 
+--- SKALA IMPACT SCORE ---
+0 = Tidak ada kaitan ekonomi
+1-3 = Rendah
+4-6 = Sedang
+7-10 = Tinggi (hanya untuk kebijakan makro besar atau peristiwa global)
+
+--- DATA BERITA ---
+Judul: {title}
+Sumber: {source}
+Tanggal: {published_at}
+Isi: {content}...
+
+--- FORMAT OUTPUT (JSON) ---
+{{
+  "main_cause": "Penyebab utama (Indonesia)",
+  "impact_explanation": "Penjelasan dampak (Indonesia)",
+  "main_category": "...",
+  "sentiment": "...",
+  "affected_markets": [...],
+  "impact_level": "...",
+  "impact_score": 0,
+  "confidence_score": 0.0,
+  "summary": "Ringkasan 2 kalimat (Indonesia)"
+}}
+"""
     return prompt.strip()
