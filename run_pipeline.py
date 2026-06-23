@@ -4,8 +4,8 @@ import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 
-from src.scraper import fetch_news
-from src.analyzer import analyze_articles
+from scraper import fetch_news
+from analyzer import analyze_articles
 
 
 MAX_SECONDS = 15

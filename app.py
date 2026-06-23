@@ -5,9 +5,9 @@ from email.utils import parsedate_to_datetime
 
 import streamlit as st
 
-from src.scraper import fetch_news
-from src.cleaner import analyze_and_filter_pipeline
-from src.analyzer import analyze_articles
+from scraper import fetch_news
+from cleaner import analyze_and_filter_pipeline
+from analyzer import analyze_articles
 
 # Konfigurasi
 MAX_SECONDS = 15
