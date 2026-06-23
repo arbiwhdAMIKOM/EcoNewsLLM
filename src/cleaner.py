@@ -1,238 +1,195 @@
-"""
-cleaner.py  —  EcoNews LLM  (v4)
-Perubahan dari v3:
-
-1. TAMBAH POLITIK_OPINI_KEYWORDS_SINGLE & _MULTI (blacklist baru)
-   Menangkap berita politik seremonial/opini jabatan yang lolos sensor sebelumnya:
-   - Frasa single: "pemilu", "pilkada", "pilpres", "koalisi", "oposisi", dll
-   - Frasa multi-kata: "2 periode", "komentari isu", "maju lagi", "pencalonan", dll
-   Berita yang match blacklist ini langsung ke discarded_non_economic KECUALI
-   ada savior keyword ekonomi yang kuat (akuisisi, obligasi, dll).
-
-2. TAMBAH COMMODITY_OVER_TAG_GUARD di post-filter
-   Setelah artikel lolos ke impactful_to_gemini, tambahkan flag
-   `_suspected_non_commodity` jika artikel BUKAN tentang komoditas tapi
-   mengandung kata komoditas secara insidental (contoh: "cetak sawah" → tidak
-   punya "minyak", "opec", "tambang", "harga emas" → flag dikirim ke Gemini
-   sebagai context hint di article metadata).
-   Analyzer akan meneruskan flag ini ke prompt sebagai peringatan tambahan.
-
-3. Memperluas MARKET_DRIVERS_SINGLE dengan kata kerja kebijakan yang selama ini
-   menyebabkan berita stimulus/fiskal ter-flag sebagai "tidak ada driver":
-   sudah dilakukan di v3, dipertahankan di sini.
-"""
-
 import re
-from typing import Tuple, List, Set
 
-RE_PREFIX    = re.compile(r'^[A-Za-z\s]+\s*\([A-Za-z\s]+\)\s*[-–]\s*')
-RE_BACA_JUGA = re.compile(r'baca [jJ]uga:.*?(?=\n|$)', re.IGNORECASE)
-RE_SPACES    = re.compile(r'\s+')
-RE_WORDS     = re.compile(r'\b[a-z0-9\-]+\b')
-
-
-def bersihkan_teks(teks: str) -> str:
-    if not teks:
-        return ""
-    teks = RE_PREFIX.sub('', teks)
-    teks = RE_BACA_JUGA.sub('', teks)
-    teks = RE_SPACES.sub(' ', teks).strip()
+# --- Fungsi pembersihan teks ---
+def bersihkan_teks(teks):
+    teks = re.sub(r'^[A-Za-z\s]+\s*\([A-Za-z]+\)\s*[-–]\s*', '', teks)
+    teks = re.sub(r'Baca [jJ]uga:.*?(?=\n|$)', '', teks)
+    teks = re.sub(r'\s+', ' ', teks).strip()
     return teks
 
-
-# ── KATA KUNCI EKONOMI ────────────────────────────────────────────────────────
-ECONOMIC_KEYWORDS_SINGLE: Set[str] = {
-    "ihsg", "saham", "bursa", "emiten", "investor", "obligasi", "rupiah", "dolar", "usd",
-    "kurs", "valas", "inflasi", "deflasi", "bitcoin", "btc", "ethereum", "eth", "crypto",
-    "kripto", "emas", "xau", "minyak", "gas", "nikel", "tembaga", "cpo", "komoditas", "ekonomi",
-    "pdb", "ekspor", "impor", "pajak", "apbn", "subsidi", "investasi", "pma", "pmdn",
-    "laba", "rugi", "profit", "dividen", "ipo", "akuisisi", "merger", "bangkrut", "pailit",
-    "fomc", "bonds", "brent", "wti", "rebound", "danantara", "deposito", "funding", "perbankan",
-    "finansial", "fiskal", "devisa", "treasury", "ekuitas", "manufaktur", "retail", "ritel",
-    "perusahaan", "korporasi", "industri", "transportasi", "logistik", "properti", "konstruksi",
-    "infrastruktur", "pertambangan", "psn", "psel", "stimulus", "anggaran", "belanja",
-    "pendapatan", "penerimaan", "defisit", "surplus", "utang", "sbn", "sukuk",
-}
-
-ECONOMIC_KEYWORDS_MULTI: List[str] = [
-    "reksa dana", "pasar modal", "wall street", "nasdaq", "dow jones", "mata uang",
-    "bank indonesia", "the fed", "suku bunga", "aset digital", "batu bara", "batubara",
-    "pertumbuhan ekonomi", "neraca perdagangan", "cadangan devisa", "gagal bayar",
-    "capital outflow", "capital inflow", "fed rate", "bi rate", "net buy", "net sell",
-    "private placement", "rights issue", "proyek strategis nasional",
-    "kebijakan fiskal", "kebijakan moneter", "stimulus fiskal", "paket stimulus",
-    "pemotongan anggaran", "pemangkasan anggaran", "efisiensi anggaran",
+# --- Daftar kata kunci (diperluas) ---
+ECONOMIC_KEYWORDS = [
+    "ihsg", "saham", "bursa", "emiten", "investor", "obligasi",
+    "reksa dana", "pasar modal", "wall street", "nasdaq", "dow jones",
+    "rupiah", "dolar", "usd", "kurs", "valas", "mata uang",
+    "bank indonesia", "the fed", "suku bunga", "inflasi", "deflasi",
+    "bitcoin", "btc", "ethereum", "eth", "crypto", "kripto", "aset digital",
+    "emas", "gold", "xau", "minyak", "gas", "batu bara", "batubara",
+    "nikel", "tembaga", "cpo", "komoditas",
+    "ekonomi", "pdb", "pertumbuhan ekonomi", "ekspor", "impor",
+    "neraca perdagangan", "cadangan devisa", "pajak", "apbn",
+    "subsidi", "investasi", "pma", "pmdn",
+    "laba", "rugi", "pendapatan", "revenue", "profit", "dividen",
+    "ipo", "akuisisi", "merger", "startup", "umkm", "industri",
+    "manufaktur", "retail", "ritel", "perbankan", "bank",
+    "energi", "transportasi", "logistik", "properti", "konstruksi",
+    "infrastruktur", "pertambangan", "psn", "psel",
+    # tambahan untuk pangan
+    "pangan", "beras", "kedelai", "jagung", "gandum", "ayam", "sapi", "protein",
+    "swasembada", "pangan", "pertanian", "peternakan", "perikanan",
 ]
 
-# ── POLICY BYPASS — kebijakan/fiskal langsung ke Gemini tanpa syarat driver ───
-POLICY_BYPASS_SINGLE: Set[str] = {
-    "apbn", "fiskal", "stimulus", "anggaran", "defisit", "surplus",
-    "subsidi", "pajak", "sbn", "sukuk", "obligasi", "penerimaan",
-    "belanja", "utang", "pmdn", "pma",
-}
-
-POLICY_BYPASS_MULTI: List[str] = [
-    "bi rate", "suku bunga", "kebijakan moneter", "kebijakan fiskal",
-    "stimulus fiskal", "paket stimulus", "pemangkasan anggaran",
-    "pemotongan anggaran", "efisiensi anggaran", "bank indonesia",
-    "the fed", "proyek strategis nasional", "dana desa", "transfer daerah",
+NON_ECONOMIC_KEYWORDS = [
+    "artis", "seleb", "film", "musik", "konser", "olahraga",
+    "sepak bola", "viral", "gosip", "kriminal", "pembunuhan",
+    "kecelakaan", "penjara", "dipenjara", "pidana", "putusan hakim",
+    "sidang", "eks presiden",
 ]
 
-# ── BLACKLIST NON-EKONOMI KERAS ───────────────────────────────────────────────
-STRICT_NON_ECONOMIC_SINGLE: Set[str] = {
-    "artis", "seleb", "selebritis", "film", "musik", "konser", "olahraga", "skandal",
-    "gosip", "pembunuhan", "kecelakaan", "biodata", "pacar", "menikah", "liga", "klub",
-    "perceraian", "sinopsis", "drama", "lagu", "piala", "juara", "atlet", "wasit",
-    "gaming", "game", "siber", "hacker", "pencurian", "perampokan", "bencana", "banjir",
-    "gempa", "cuaca", "kuliner", "resep", "wisata", "sidang", "kriminal", "penjara",
-    "dipenjara", "pidana", "putusan hakim", "eks presiden",
-}
-
-# ── BLACKLIST POLITIK OPINI/SEREMONIAL (BARU di v4) ──────────────────────────
-# Berita pernyataan tokoh, spekulasi jabatan, dan opini pemilu tidak punya
-# nilai ekonomi — buang sebelum memakan token LLM.
-POLITIK_OPINI_SINGLE: Set[str] = {
-    "pemilu", "pilkada", "pilpres", "koalisi", "oposisi", "partai",
-    "capres", "cawapres", "calon", "kampanye", "politikus", "legislatif",
-    "parlemen", "dpr", "dprd", "mpr", "fraksi", "parpol",
-}
-
-POLITIK_OPINI_MULTI: List[str] = [
-    "2 periode", "dua periode", "komentari isu", "maju lagi", "pencalonan",
-    "isu jabatan", "reshuffle kabinet", "pernyataan politik", "obrolan politik",
-    "opini pemilu", "suara partai", "elektabilitas", "survei politik",
-    "masa jabatan", "perpanjangan jabatan", "presiden 3 periode",
+POLITICAL_PURE_KEYWORDS = [
+    "pemilu", "pilpres", "pileg", "pilkada", "masa jabatan", "2 periode",
+    "periode kedua", "koalisi", "partai", "parpol", "kudeta", "konflik politik",
+    "wacana presiden", "amandemen", "presiden 3 periode",
 ]
 
-# Savior: jika ada kata bisnis/ekonomi kuat, berita politik bisa lolos
-# (contoh: berita "reshuffle kabinet + menteri keuangan baru" → ada dampak ekonomi)
-POLITIK_ECONOMIC_SAVIOR: Set[str] = {
-    "anggaran", "apbn", "fiskal", "investasi", "obligasi", "pasar", "ihsg",
-    "rupiah", "ekonomi", "bank", "menteri keuangan", "menkeu", "bapenas",
-}
+FISCAL_KEYWORDS = [
+    "stimulus", "subsidi", "pajak", "apbn", "belanja", "anggaran",
+    "defisit", "utang", "pinjaman", "kucuran dana", "bantuan sosial",
+    "program", "proyek", "infrastruktur", "psn",
+]
 
-# ── BLACKLIST RENDAH NILAI ────────────────────────────────────────────────────
-LOW_VALUE_KEYWORDS_SINGLE: Set[str] = {
-    "tips", "cara", "simak", "kenali", "panduan", "edukasi", "kamus", "istilah",
-    "belajar", "mengenal", "rekomendasi", "pemula", "definisi", "pengertian",
-    "apa bedanya", "daftar lengkap", "ini dia", "viral", "profil", "biodata", "sejarah",
-}
+IMPACT_KEYWORDS = [
+    "melemah", "menguat", "naik", "turun", "anjlok", "tertekan",
+    "rebound", "merosot", "melonjak", "tumbuh", "melambat",
+    "inflasi", "suku bunga", "the fed", "bank indonesia", "bi rate",
+    "rupiah", "dolar", "usd", "kurs",
+    "ihsg", "saham", "bursa", "wall street", "nasdaq", "dow jones",
+    "investor", "asing", "capital outflow", "capital inflow",
+    "minyak", "emas", "xau", "batu bara", "batubara", "nikel",
+    "komoditas", "energi",
+    "bitcoin", "btc", "ethereum", "eth", "crypto", "kripto",
+    "ekspor", "impor", "neraca perdagangan", "pdb",
+    "cadangan devisa", "apbn", "pajak", "subsidi",
+    "konflik", "perang", "geopolitik", "sanksi",
+    "rusia", "ukraina", "iran", "israel", "timur tengah",
+    "laba", "rugi", "pendapatan", "dividen", "ipo", "akuisisi",
+    "merger", "bangkrut", "pailit",
+]
 
-# ── MARKET DRIVERS ────────────────────────────────────────────────────────────
-MARKET_DRIVERS_SINGLE: Set[str] = {
-    "melemah", "menguat", "naik", "naikkan", "turun", "turunkan", "anjlok", "tertekan",
-    "merosot", "melonjak", "tumbuh", "melambat", "konflik", "perang", "geopolitik", "sanksi",
-    "suspensi", "delisting", "borong", "rebutan", "diserbu", "longsor", "perkasa", "pangkas",
-    "cetak", "rebound", "gelontorkan", "kucurkan", "alokasikan", "tetapkan", "putuskan",
-    "potong", "tambah", "kurangi", "revisi", "rilis", "umumkan",
-}
+LOW_VALUE_KEYWORDS = [
+    "tips", "cara", "simak", "kenali", "apa bedanya", "daftar lengkap",
+    "ini dia", "viral", "profil", "biodata", "sejarah", "pengertian",
+]
 
-# ── COMMODITY CONTEXT SIGNALS — untuk flag anti-over-tagging ─────────────────
-# Jika artikel TIDAK mengandung sinyal ini, maka hampir pasti bukan berita
-# komoditas murni → Gemini diberi warning via metadata artikel
-COMMODITY_CONTEXT_SIGNALS: Set[str] = {
-    "minyak", "opec", "brent", "wti", "tambang", "pertambangan", "ore",
-    "harga emas", "xau", "gold", "perak", "silver", "nikel", "tembaga",
-    "batu bara", "batubara", "lng", "lpg", "kilang", "eksplorasi",
-}
+# --- Normalisasi ---
+def normalize_text(teks):
+    teks = str(teks).lower()
+    teks = bersihkan_teks(teks)
+    teks = re.sub(r"\s+", " ", teks)
+    return teks.strip()
 
+def normalize_title(title):
+    """Normalisasi judul untuk deduplikasi."""
+    t = str(title).lower()
+    t = re.sub(r'[^a-z0-9]', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
 
-def prepare_article_tokens(article: dict) -> Tuple[str, Set[str]]:
-    title   = article.get("title", "")
-    content = article.get("content", "")[:800]
-    source  = article.get("source", "")
-    combined_clean = bersihkan_teks(f"{title} {content} {source}").lower()
-    tokens = set(RE_WORDS.findall(combined_clean))
-    return combined_clean, tokens
+def deduplicate_articles(articles):
+    """Hapus artikel dengan judul yang sama (case-insensitive, normalized)."""
+    seen = set()
+    unique = []
+    for art in articles:
+        norm = normalize_title(art.get('title', ''))
+        if norm and norm not in seen:
+            seen.add(norm)
+            unique.append(art)
+    return unique
 
+# --- Fungsi filter ---
+def is_economic_news(article):
+    title = article.get("title", "")
+    content = article.get("content", "")
+    source = article.get("source", "")
+    text = normalize_text(f"{title} {content} {source}")
 
-def analyze_and_filter_pipeline(articles: list) -> Tuple[list, list, list]:
-    """
-    Pipeline penyaringan satu-langkah (single-pass).
-    Mengembalikan (impactful_to_gemini, low_impact_or_saved, discarded_non_economic).
+    # Deteksi non-ekonomi kuat
+    for keyword in NON_ECONOMIC_KEYWORDS:
+        if keyword in text:
+            return False
 
-    Alur keputusan:
-      1. Hard-block non-ekonomi (hiburan, kriminal, olahraga)
-      2. Hard-block politik opini/seremonial (BARU v4) — kecuali ada savior ekonomi kuat
-      3. Cek relevansi ekonomi minimal
-      4. Skip artikel edukasi/tips rendah nilai
-      5a. Policy bypass → langsung Gemini
-      5b. Market driver (aset + kata kerja) → Gemini
-      5c. Sisanya → low_impact_or_saved
-      6. Flag artikel non-komoditas (BARU v4) sebagai hint ke Gemini
-    """
-    impactful_to_gemini    = []
-    low_impact_or_saved    = []
-    discarded_non_economic = []
+    # Deteksi politik murni (tanpa fiskal)
+    has_political = any(kw in text for kw in POLITICAL_PURE_KEYWORDS)
+    has_fiscal = any(kw in text for kw in FISCAL_KEYWORDS)
+    if has_political and not has_fiscal:
+        return False
 
-    savior_keywords = {
-        "saham", "laba", "investasi", "akuisisi", "omset", "pendapatan", "obligasi", "emiten",
-    }
+    # Cek kata kunci ekonomi
+    for keyword in ECONOMIC_KEYWORDS:
+        if keyword in text:
+            return True
 
-    financial_assets_single: Set[str] = {
-        "ihsg", "saham", "rupiah", "dolar", "usd", "kurs", "bitcoin", "btc",
-        "ethereum", "eth", "emas", "xau", "minyak", "inflasi", "bonds", "obligasi",
-        "danantara", "emiten", "laba", "dividen",
-    }
-    financial_assets_multi: List[str] = ["suku bunga", "net buy", "private placement"]
+    return False
 
-    for article in articles:
-        text, tokens = prepare_article_tokens(article)
+def is_potentially_impactful_news(article):
+    title = article.get("title", "")
+    content = article.get("content", "")
+    text = normalize_text(f"{title} {content}")
 
-        # ── STEP 1: Hard-block non-ekonomi (hiburan/kriminal/olahraga) ───────
-        has_strict_non_eco = not tokens.isdisjoint(STRICT_NON_ECONOMIC_SINGLE)
-        has_savior = not tokens.isdisjoint(savior_keywords)
-        if has_strict_non_eco and not has_savior:
-            discarded_non_economic.append(article)
-            continue
+    # Lewati berita ringan (tips, edukasi)
+    for kw in LOW_VALUE_KEYWORDS:
+        if kw in text:
+            return False
 
-        # ── STEP 2: Hard-block politik opini/seremonial (BARU v4) ────────────
-        has_politik_single = not tokens.isdisjoint(POLITIK_OPINI_SINGLE)
-        has_politik_multi  = any(kw in text for kw in POLITIK_OPINI_MULTI)
-        if has_politik_single or has_politik_multi:
-            # Lolos hanya jika ada savior ekonomi kuat (contoh: berita menkeu baru)
-            has_politik_savior = not tokens.isdisjoint(POLITIK_ECONOMIC_SAVIOR)
-            politik_savior_multi = any(kw in text for kw in ["menteri keuangan", "menkeu", "bank sentral"])
-            if not (has_politik_savior or politik_savior_multi):
-                discarded_non_economic.append(article)
-                continue
+    impact_score = 0
 
-        # ── STEP 3: Cek relevansi ekonomi minimal ────────────────────────────
-        has_economic_single = not tokens.isdisjoint(ECONOMIC_KEYWORDS_SINGLE)
-        has_economic_multi  = any(kw in text for kw in ECONOMIC_KEYWORDS_MULTI)
-        if not (has_economic_single or has_economic_multi):
-            discarded_non_economic.append(article)
-            continue
+    # Bobot lebih untuk kata kunci kuat (geopolitik, energi, makro)
+    strong_keywords = [
+        "perang", "konflik", "geopolitik", "sanksi", "iran", "israel", "rusia", "ukraina",
+        "opec", "minyak", "gas", "batu bara", "energi", "emas", "xau",
+        "suku bunga", "the fed", "bi rate", "inflasi", "resesi",
+        "pertumbuhan ekonomi", "pdb", "ekspor", "impor", "neraca perdagangan",
+        "ihsg", "saham", "wall street", "nasdaq", "dow jones",
+        "swasembada", "protein", "pangan", "pertanian", "peternakan"   # tambahan pangan
+    ]
+    for kw in strong_keywords:
+        if kw in text:
+            impact_score += 2
 
-        # ── STEP 4: Skip artikel rendah nilai ────────────────────────────────
-        has_low_value = not tokens.isdisjoint(LOW_VALUE_KEYWORDS_SINGLE)
-        if has_low_value:
-            low_impact_or_saved.append(article)
-            continue
+    # Kata kunci umum dari IMPACT_KEYWORDS
+    for kw in IMPACT_KEYWORDS:
+        if kw in text:
+            impact_score += 1
 
-        # ── STEP 5a: Policy bypass → langsung Gemini ─────────────────────────
-        has_policy_single = not tokens.isdisjoint(POLICY_BYPASS_SINGLE)
-        has_policy_multi  = any(kw in text for kw in POLICY_BYPASS_MULTI)
-        if has_policy_single or has_policy_multi:
-            # Flag komoditas: apakah artikel ini punya sinyal komoditas nyata?
-            has_commodity_signal = not tokens.isdisjoint(COMMODITY_CONTEXT_SIGNALS)
-            if not has_commodity_signal:
-                article = {**article, "_no_commodity_context": True}
-            impactful_to_gemini.append(article)
-            continue
+    # Bonus data numerik
+    if re.search(r'\d+[.,]?\d*\%?', text):
+        impact_score += 2
 
-        # ── STEP 5b: Market driver (aset + kata kerja penggerak) ─────────────
-        has_asset_single = not tokens.isdisjoint(financial_assets_single)
-        has_asset_multi  = any(kw in text for kw in financial_assets_multi)
-        has_asset  = has_asset_single or has_asset_multi
-        has_driver = not tokens.isdisjoint(MARKET_DRIVERS_SINGLE)
+    # Penalti politik murni
+    has_political = any(kw in text for kw in POLITICAL_PURE_KEYWORDS)
+    has_fiscal = any(kw in text for kw in FISCAL_KEYWORDS)
+    if has_political and not has_fiscal:
+        impact_score = 0
 
-        if has_asset and has_driver:
-            has_commodity_signal = not tokens.isdisjoint(COMMODITY_CONTEXT_SIGNALS)
-            if not has_commodity_signal:
-                article = {**article, "_no_commodity_context": True}
-            impactful_to_gemini.append(article)
+    # Threshold 4 agar lolos untuk berita geopolitik penting
+    return impact_score >= 4
+
+def filter_economic_articles(articles):
+    economic = []
+    skipped = []
+    for art in articles:
+        if is_economic_news(art):
+            economic.append(art)
         else:
-            low_impact_or_saved.append(article)
+            skipped.append(art)
+    return economic, skipped
 
-    return impactful_to_gemini, low_impact_or_saved, discarded_non_economic
+def filter_potentially_impactful_articles(articles):
+    impactful = []
+    low_value = []
+    for art in articles:
+        if is_potentially_impactful_news(art):
+            impactful.append(art)
+        else:
+            low_value.append(art)
+    return impactful, low_value
+
+# --- Pipeline utama ---
+def analyze_and_filter_pipeline(articles):
+    # 1. Deduplikasi
+    articles = deduplicate_articles(articles)
+    # 2. Filter ekonomi vs non-ekonomi
+    economic_articles, non_economic_articles = filter_economic_articles(articles)
+    # 3. Filter berdampak vs low-value
+    impactful_articles, low_value_articles = filter_potentially_impactful_articles(economic_articles)
+    return impactful_articles, low_value_articles, non_economic_articles
