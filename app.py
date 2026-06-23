@@ -237,9 +237,6 @@ if run_button:
                     st.write("**Summary:**")
                     st.write(item.get("summary", "-"))
 
-                    st.write("**Impact Explanation:**")
-                    st.write(item.get("impact_explanation", "-"))
-
                     st.write("**Confidence Score:**")
                     st.write(f"{item.get('confidence_score', 0.0):.2f}")
 
