@@ -1,4 +1,4 @@
-from taxonomy import (
+from src.taxonomy import (
     MAIN_CATEGORIES,
     SENTIMENTS,
     IMPACT_LEVELS,
@@ -15,7 +15,7 @@ def build_news_analysis_prompt(article: dict) -> str:
 Anda adalah Analis Intelijen Finansial Senior yang SANGAT KETAT, OBJEKTIF, dan TIDAK MUDAH TERTIPU.
 Tugas Anda adalah mengekstrak data dari teks berita mentah menjadi format terstruktur.
 
---- ATURAN MUTLAK (ANTI-HALUSINASI) ---
+--- ATURAN MUTLAK ---
 
 1. **Klasifikasi Sektor HARUS TEPAT**:
    - Batu bara, minyak, gas, energi terbarukan → **komoditas & energi**

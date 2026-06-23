@@ -10,8 +10,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import init_db, simpan_banyak_berita
-from cleaner import bersihkan_teks
+from src.database import init_db, simpan_banyak_berita
+from src.cleaner import bersihkan_teks
 
 SOURCES: Dict[str, str] = {
     "CNBC Indonesia": "https://www.cnbcindonesia.com/news/rss",
